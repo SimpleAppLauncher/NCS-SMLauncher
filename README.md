@@ -1,19 +1,20 @@
 # NCS-SMLauncher
+> Currently, it's on life support. It's still on my radar, but... IDK. So the release is now not so... "fast. " That doesn't mean I forget y'all tho.
+> I'm encouraging you to use the older release version. It will be integrated into SNLauncher in the future.
+
 A music launcher for people who need a feature-rich yet simple music launcher. In the style of NoCopyrightSong, of course.
 
 <img width="1470" height="923" alt="Screenshot 2026-09-02 at 12 26 05 pm" src="https://github.com/user-attachments/assets/e4f2ecf2-9fc3-49b9-a81c-c4d7c7344aa4" />
 
 This is a music launcher that takes some inspiration from NCS. This was made with AI so...
 
-I have plan to make all the art made by me. 
+# The features in my launcher:
+Torrent download: You can take a hash from a torrent;
 
-# The feature in my launcher:
-Torrent download: You can take hash from torrent;
-
-Avg 'bars format' visualizer and "NCS style" visualizer (Its not finish yet)
+Avg 'bars format' visualizer and "NCS style" visualizer (It's not finished yet)
 
 # How to play it:
-1: Download the source code (Any, from github or from internet archive)
+1: Download the source code (Any, from github or from Internet Archive)
 
 2: Open the python file named "ncs_launcher.py" (Should be in a terminal/CMD like this:  python3 /Users/giathinh/ncs-music-launcher/src/ncs_launcher.py ~/[ANY FOLDER YOU WANT TO LISTEN UR MUSIC TO] on mac and idfk on windows)
 
@@ -40,3 +41,6 @@ BTC: bc1q5m0jyurvm9937sg06edw7j8gasj3vktmml63wq
 Solana: HB9fjzcMc8xu9QgGM8kpXUbSRmzbbzWJXi5RvXCin8r1
 
 Base: 0xCD77ed8efd0793B9DB5972F739800590c9023a37
+
+
+# UPDATE: Now the Internet Archive version is just... not gonna be here anymore.
