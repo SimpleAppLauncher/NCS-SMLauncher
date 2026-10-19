@@ -1975,7 +1975,13 @@ def main():
         on_next=lambda: media_key_handler("next"),
         on_previous=lambda: media_key_handler("previous")
     )
-    media_tap.start()
+    if not media_tap.start():
+        # False means macOS has not granted Accessibility to this process (or
+        # Quartz is missing). Without a hint, an unresponsive play/pause key is
+        # indistinguishable from a bug -- and it was reported as exactly that.
+        push_notice(("info",
+                     "media keys need Accessibility permission: "
+                     "System Settings > Privacy & Security > Accessibility"))
 
     running = True
     frame_no = 0

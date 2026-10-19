@@ -52,12 +52,40 @@ cover/
 
 # Environments
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Secrets and credentials -- nothing personal or private should ever be
+# committable. These patterns cover the common cases; anything that looks
+# like a key, token, or password is excluded on principle.
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials*.json
+*credentials*.txt
+*secret*
+*token*.txt
+.secrets/
+.private/
+*.local.json
+id_rsa*
+*.ppk
+
+# Local machine state that never belongs in a repo
+.DS_Store
+Thumbs.db
+*.swp
+*~
 
 # Spyder project settings
 .spyderproject
