@@ -149,7 +149,14 @@ fun PlayerScreen(
         }
     }
 
-    DisposableEffect(Unit) { onDispose { controller.release() } }
+    DisposableEffect(Unit) {
+        onDispose {
+            controller.release()
+            // The torrent scope and its libtorrent session outlived the screen
+            // otherwise: one leaked poll loop + open listen ports per disposal.
+            torrents.release()
+        }
+    }
 
     // --- gamepad + keyboard -------------------------------------------------
     // Both arrive as key events, so one handler covers a pad's D-pad, its

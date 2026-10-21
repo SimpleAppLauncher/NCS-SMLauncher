@@ -54,6 +54,14 @@ class TorrentManager(@Suppress("UNUSED_PARAMETER") private val context: Context)
         return false
     }
 
+    /**
+     * Present for surface parity with the real manager: the shared screens
+     * call release() on dispose without knowing which flavor they compiled
+     * into. There is nothing to stop here -- no scope, no session -- so this
+     * is a no-op by design, and its presence is enforced by the build.
+     */
+    fun release() {}
+
     companion object {
         /** Lite accepts nothing, exactly as the real one rejects a bad hash. */
         @Suppress("UNUSED_PARAMETER")

@@ -12,8 +12,7 @@
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
-        android:theme="@style/Theme.HashPlay"
-        android:usesCleartextTraffic="true">
+        android:theme="@style/Theme.HashPlay">
 
         <activity
             android:name=".MainActivity"

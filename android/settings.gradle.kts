@@ -13,3 +13,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "HashPlay"
 include(":app")
+include(":playerkit")

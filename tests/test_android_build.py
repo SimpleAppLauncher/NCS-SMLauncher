@@ -43,6 +43,28 @@ def read(path):
         return fh.read()
 
 
+KIT_JAVA = os.path.join(REPO, "android", "playerkit", "src", "main", "java",
+                        "com", "giathinh", "hashplay")
+APP_JAVA = os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
+                        "hashplay")
+
+
+def JAVA(name):
+    """Locate an Android Kotlin source, kit-aware.
+
+    The player engine (PlaybackService, PlayerController, LibraryScanner,
+    NcsSphere, HashSettings, Permissions, ...) moved into the :playerkit
+    module so another app can embed it; app-only files (the screens,
+    MainActivity, FolderPicker) stayed in :app. Tests should not care which
+    module a file lives in, so this resolves either, playerkit first.
+    """
+    for base in (KIT_JAVA, APP_JAVA):
+        path = os.path.join(base, name)
+        if os.path.isfile(path):
+            return path
+    raise FileNotFoundError(name)
+
+
 gradle = read(GRADLE)
 workflow = read(WORKFLOW)
 
@@ -84,9 +106,11 @@ check(os.path.isfile(os.path.join(ANDROID_SRC, "full", "java", "com",
 check(os.path.isfile(os.path.join(ANDROID_SRC, "lite", "java", "com",
                                   "giathinh", "hashplay", "TorrentManager.kt")),
       "the lite stub lives in src/lite/")
-check(not os.path.isfile(os.path.join(ANDROID_SRC, "main", "java", "com",
-                                      "giathinh", "hashplay", "TorrentManager.kt")),
-      "neither is in src/main, where both would compile at once")
+check(not os.path.isfile(os.path.join(APP_JAVA, "TorrentManager.kt")) and
+      not os.path.isfile(os.path.join(KIT_JAVA, "TorrentManager.kt")),
+      "the TorrentManagers live only in the flavor source sets -- not in "
+      "src/main (both would compile at once) and not in :playerkit (an "
+      "embedder would inherit torrenting)")
 
 # Both APKs sit on the same home screen, so the labels must differ or there is
 # no way to tell the icons apart. The label is a resource, not a manifest
@@ -152,15 +176,12 @@ for flavor, task in (("full", "assembleFullRelease"),
 # Each one compiled, installed, launched, and rendered a screenshot -- and was
 # still broken. None would ever have failed CI.
 print("\n  the app is not inert (all three compiled, installed, and rendered)")
-player = read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                          "hashplay", "PlayerScreen.kt"))
+player = read(JAVA("PlayerScreen.kt"))
 
 # 1. PlayerController.tick() existed but NOTHING called it. It is what advances
 #    the seek bar and feeds the spectrum, so the slider sat at 0:00 and the
 #    visualizer never moved even while audio played.
-tick_def = [l for l in open(os.path.join(ANDROID_SRC, "main", "java", "com",
-                                         "giathinh", "hashplay",
-                                         "PlayerController.kt")).read()
+tick_def = [l for l in open(JAVA("PlayerController.kt")).read()
             .splitlines() if "fun tick(" in l]
 check(len(tick_def) == 1, "PlayerController declares tick()")
 check("controller.tick(" in player,
@@ -181,8 +202,7 @@ check("RequestMultiplePermissions" in player or
       "the app ASKS for that permission at runtime",
       "a manifest entry alone is not a grant; without this the library is "
       "always empty on a fresh install")
-check(read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                        "hashplay", "Permissions.kt")).count("READ_MEDIA_AUDIO") >= 1,
+check(read(JAVA("Permissions.kt")).count("READ_MEDIA_AUDIO") >= 1,
       "Permissions.kt picks the right read permission per API level",
       "READ_MEDIA_AUDIO only exists on API 33+; below that it is "
       "READ_EXTERNAL_STORAGE")
@@ -190,10 +210,8 @@ check(read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
 # 3. play() used Uri.fromFile(), which is both unreadable under scoped storage
 #    and fatal when handed to another app (FileUriExposedException on 7+).
 #    Track.id was already populated by LibraryScanner and never used.
-ctrl = read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                         "hashplay", "PlayerController.kt"))
-scanner = read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                            "hashplay", "LibraryScanner.kt"))
+ctrl = read(JAVA("PlayerController.kt"))
+scanner = read(JAVA("LibraryScanner.kt"))
 check("MediaStore.Audio.Media.EXTERNAL_CONTENT_URI" in scanner,
       "play() builds a content:// URI from the MediaStore id",
       "Uri.fromFile is not readable under scoped storage and throws when "
@@ -208,8 +226,7 @@ check("ContentUris.withAppendedId" in scanner,
 # activity, there was no media notification, and hardware media keys had
 # nothing to bind to -- four desktop features missing from one bug.
 print("\n  exactly one player, owned by the service")
-svc = read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                        "hashplay", "PlaybackService.kt"))
+svc = read(JAVA("PlaybackService.kt"))
 check(svc.count("ExoPlayer.Builder(") == 1,
       "PlaybackService builds the only ExoPlayer")
 check("MediaSession.Builder(" in svc,
@@ -260,10 +277,8 @@ check("seekToNextMediaItem" in ctrl,
 # marked complete it never nags again, even if the user walked away. Android had
 # no first run at all -- it went straight to the player.
 print("\n  first run exists and never nags (setup_wizard.py:224-234)")
-setup = read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                         "hashplay", "SetupState.kt"))
-main_act = read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                             "hashplay", "MainActivity.kt"))
+setup = read(JAVA("SetupState.kt"))
+main_act = read(JAVA("MainActivity.kt"))
 check("fun needsSetup()" in setup,
       "there is a first-run gate at all")
 check("setup_complete" in setup,
@@ -277,8 +292,7 @@ check("SetupScreen" in main_act and "needsSetup()" in main_act,
       "MainActivity shows SetupScreen on first run")
 # Escape is an answer: SetupScreen must complete() on BOTH paths, not just the
 # grant path, or a user who backs out gets nagged on every launch.
-setup_screen = read(os.path.join(ANDROID_SRC, "main", "java", "com",
-                                 "giathinh", "hashplay", "SetupScreen.kt"))
+setup_screen = read(JAVA("SetupScreen.kt"))
 check(setup_screen.count("setup.complete()") >= 2,
       "both continuing and skipping mark setup complete",
       "if only the grant path completes, every launch nags a user who backed "
@@ -290,8 +304,7 @@ check("Not now" in setup_screen,
 # video background is honest to bring across; the rest would be shipping a
 # YouTube downloader inside a music player.
 print("\n  video backgrounds: portable subset only (ncs_video.py)")
-vid = read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                        "hashplay", "VideoBackground.kt"))
+vid = read(JAVA("VideoBackground.kt"))
 gradle = read(os.path.join(REPO, "android", "app", "build.gradle.kts"))
 check("media3-ui" in gradle,
       "media3-ui is a dependency (PlayerView needs it, and exoplayer does "
@@ -372,13 +385,11 @@ check("catch (t: Exception)" in player,
       "refresh() guards the scan it launches",
       "an uncaught throw on Dispatchers.IO takes the whole process down")
 
-picker = os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                      "hashplay", "FolderPicker.kt")
+picker = JAVA("FolderPicker.kt")
 print("\n  transport parity with the desktop's K_UP / K_DOWN")
 # NB: the variable above named `player` holds PlayerSCREEN.kt. Reaching for it
 # as if it were the controller is how six of these checks failed at first.
-ctrl = read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                         "hashplay", "PlayerController.kt"))
+ctrl = read(JAVA("PlayerController.kt"))
 # The desktop has these (ncs_launcher.py:2195-2204). Android had no way to move
 # between tracks except tapping another row, which loses your place in the queue.
 check("fun skipNext()" in ctrl and "fun skipPrevious()" in ctrl,
@@ -494,8 +505,7 @@ check("apksigner" in bs,
       "stores no .RSA file, so a zip listing reports valid APKs as unsigned)")
 
 print("\n  the NCS sphere is not silently rendering black")
-ncs = read(os.path.join(ANDROID_SRC, "main", "java", "com", "giathinh",
-                        "hashplay", "NcsSphere.kt"))
+ncs = read(JAVA("NcsSphere.kt"))
 # to255 truncated the 0..1 value BEFORE multiplying by 255, so every value
 # below 1.0 became 0 and the only reachable outputs were 0 and 255. Every
 # channel came out 0, `out` stayed 0xFF000000 -- the same value as the

@@ -28,8 +28,25 @@ def check(cond, label, why=""):
 
 
 def read(*parts):
-    with open(os.path.join(REPO, *parts), encoding="utf-8") as fh:
-        return fh.read()
+    """Read a repo file, falling back to the :playerkit module.
+
+    The playback engine (PlaybackService, PlayerController) moved into
+    android/playerkit/ when the player became embeddable; the screens stayed
+    in the app. Path arguments are unchanged -- the fallback resolves them.
+    """
+    path = os.path.join(REPO, *parts)
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    # Kit fallback: same subtree under android/playerkit. Handles both the
+    # pre-joined form (read(android_src, "File.kt")) and split segments.
+    if f"{os.sep}app{os.sep}src{os.sep}" in path:
+        kit = path.replace(f"{os.sep}app{os.sep}src{os.sep}",
+                           f"{os.sep}playerkit{os.sep}src{os.sep}", 1)
+        if os.path.isfile(kit):
+            with open(kit, encoding="utf-8") as fh:
+                return fh.read()
+    raise FileNotFoundError(path)
 
 
 print("\n  desktop: launching never starts audio")

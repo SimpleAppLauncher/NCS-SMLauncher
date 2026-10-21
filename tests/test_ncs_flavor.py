@@ -20,6 +20,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GRADLE = ROOT / "android" / "app" / "build.gradle.kts"
 MAIN = ROOT / "android" / "app" / "src" / "main" / "java" / "com" / "giathinh" / "hashplay"
+
+KIT = ROOT / "android" / "playerkit" / "src" / "main" / "java" / "com" / "giathinh" / "hashplay"
+
+
+def src(name: str) -> Path:
+    """Kit-aware source lookup: the engine moved into :playerkit, the screens
+    stayed in :app. Tests should not care which module a file lives in."""
+    for base in (KIT, MAIN):
+        p = base / name
+        if p.is_file():
+            return p
+    raise FileNotFoundError(name)
 SCRIPT = ROOT / "scripts" / "build_android_apks.sh"
 
 
@@ -78,7 +90,7 @@ class NcsScreenRouting(unittest.TestCase):
 
 class LeanBehaviour(unittest.TestCase):
     def setUp(self):
-        self.prefs = (MAIN / "NcsPrefs.kt").read_text()
+        self.prefs = src("NcsPrefs.kt").read_text()
         self.screen = (MAIN / "NcsPlayerScreen.kt").read_text()
 
     def test_lean_is_a_clamped_fraction(self):
@@ -109,23 +121,23 @@ class LeanBehaviour(unittest.TestCase):
         self.assertIn("HashSettings.stepLean(lean, 0, it)", overlay)
 
     def test_renderer_accepts_a_lean(self):
-        sphere = (MAIN / "NcsSphere.kt").read_text()
+        sphere = src("NcsSphere.kt").read_text()
         self.assertIn("lean: Float = 0f", sphere)
         self.assertIn("coerceIn(-1f, 1f)", sphere)
 
     def test_renderer_clamps_against_the_real_radius(self):
         """Clamping against half the window instead clipped the sphere."""
-        sphere = (MAIN / "NcsSphere.kt").read_text()
+        sphere = src("NcsSphere.kt").read_text()
         self.assertIn("val travel = (width / 2f - radius)", sphere)
 
     def test_lean_does_not_push_the_ball_off_screen(self):
-        sphere = (MAIN / "NcsSphere.kt").read_text()
+        sphere = src("NcsSphere.kt").read_text()
         self.assertIn("coerceAtLeast(0f)", sphere)
 
 
 class KeymapPort(unittest.TestCase):
     def setUp(self):
-        self.prefs = (MAIN / "NcsPrefs.kt").read_text()
+        self.prefs = src("NcsPrefs.kt").read_text()
 
     def test_actions_are_declared(self):
         for action in ("A_PREV", "A_NEXT", "A_PLAY_PAUSE", "A_CYCLE_VIZ", "A_QUIT"):
@@ -174,7 +186,7 @@ class GamepadSupport(unittest.TestCase):
     """
 
     def setUp(self):
-        self.pad = (MAIN / "Gamepad.kt").read_text()
+        self.pad = src("Gamepad.kt").read_text()
         self.activity = (MAIN / "MainActivity.kt").read_text()
 
     def test_face_button_is_play_pause(self):
@@ -214,13 +226,13 @@ class GamepadSupport(unittest.TestCase):
 
     def test_the_sink_is_cleared_on_dispose(self):
         """A stale sink calls into a screen that is gone."""
-        listener = (MAIN / "PadListener.kt").read_text()
+        listener = src("PadListener.kt").read_text()
         self.assertIn("onDispose { Gamepad.sink = null }", listener)
 
 
 class ThemeModes(unittest.TestCase):
     def setUp(self):
-        self.settings = (MAIN / "HashSettings.kt").read_text()
+        self.settings = src("HashSettings.kt").read_text()
         self.overlay = (MAIN / "SettingsOverlay.kt").read_text()
 
     def test_both_themes_exist(self):
@@ -290,18 +302,18 @@ class PixelTypographyEverywhere(unittest.TestCase):
 
     def setUp(self):
         self.main = MAIN
-        self.type = (MAIN / "PixelType.kt").read_text()
-        self.theme = (MAIN / "Theme.kt").read_text()
+        self.type = src("PixelType.kt").read_text()
+        self.theme = src("Theme.kt").read_text()
 
     def test_both_fonts_are_bundled(self):
-        res = ROOT / "android" / "app" / "src" / "main" / "res" / "font"
+        res = ROOT / "android" / "playerkit" / "src" / "main" / "res" / "font"
         for f in ("silkscreen_regular.ttf", "silkscreen_bold.ttf", "pixelify_sans.ttf"):
             self.assertTrue((res / f).exists(), f)
             self.assertGreater((res / f).stat().st_size, 5000, f)
 
     def test_fonts_are_real_ttf_not_placeholders(self):
         """A 14-byte '404: Not Found' saved as a .ttf builds and renders nothing."""
-        res = ROOT / "android" / "app" / "src" / "main" / "res" / "font"
+        res = ROOT / "android" / "playerkit" / "src" / "main" / "res" / "font"
         for f in res.glob("*.ttf"):
             head = f.read_bytes()[:4]
             self.assertIn(head, (b"\x00\x01\x00\x00", b"true", b"OTTO"),
@@ -352,7 +364,7 @@ class VisualizerAsBackground(unittest.TestCase):
     """The full-bleed option, and the near-black it hands the app."""
 
     def setUp(self):
-        self.settings = (MAIN / "HashSettings.kt").read_text()
+        self.settings = src("HashSettings.kt").read_text()
         self.overlay = (MAIN / "SettingsOverlay.kt").read_text()
         self.player = (MAIN / "PlayerScreen.kt").read_text()
 

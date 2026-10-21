@@ -86,6 +86,17 @@ fun NcsPlayerScreen(
     // The stored gain is only the starting level; the service owns it after.
     LaunchedEffect(Unit) { controller.setVolume(HashSettings.gain(hashPrefs)) }
 
+    // Release on dispose. This screen never had this: the controller kept its
+    // MediaController bound and the torrent manager kept its 1 Hz poll loop
+    // plus libtorrent session running for the life of the process, one set
+    // leaked per navigation away and back.
+    DisposableEffect(Unit) {
+        onDispose {
+            controller.release()
+            torrents.release()
+        }
+    }
+
     // TOUCH means big targets under the thumb; KEYBOARD stays compact, which is
     // also what a pad gets. Sizes below all derive from this one flag.
     val touch = theme == HashSettings.Theme.TOUCH

@@ -2,6 +2,7 @@ package com.giathinh.hashplay
 
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -104,6 +105,28 @@ class TorrentManager(private val context: Context) {
                 delay(1000)
             }
         }
+    }
+
+    /**
+     * Tear the manager down: stop the 1 Hz polling coroutine, then the
+     * libtorrent session and its native threads.
+     *
+     * Without this, every PlayerScreen disposal leaked both: the scope kept
+     * polling a session nobody would ever read from, and the session kept its
+     * announce and listen ports open for the life of the process. The screen
+     * owns this object via `remember`, so it must release it on dispose --
+     * PlayerScreen and NcsPlayerScreen both do, next to controller.release().
+     */
+    @Synchronized
+    fun release() {
+        scope.cancel()
+        session?.let { sm ->
+            try { sm.stop() } catch (_: Exception) {
+                // stop() throws if the session never started; releasing an
+                // unborn session is a no-op, not a failure.
+            }
+        }
+        session = null
     }
 
     private fun scanDownloaded() {

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PlayerKit's own manifest. Everything here merges into any app that depends
+  on this module (AAR or included project), which is how embedding stays a
+  one-line change on the embedder's side: the playback service, its foreground
+  type and the permissions the engine needs arrive without the embedder
+  writing any of it.
+
+  Class names are spelled out (not .Relative) because the kit's namespace is
+  com.giathinh.hashplay and relative names resolve against it; spelling them
+  out survives any future namespace change.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Background playback: the service must be allowed to become a
+         foreground service, and to do so as media playback specifically
+         (Android 14 requires the type to be declared AND permitted). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- The media notification is how the user sees and controls background
+         playback; on API 33+ posting it needs this at runtime. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The library scanner reads MediaStore audio. Declared here so an
+         embedder gets the same permission surface the standalone app has;
+         the RUNTIME request still comes from Permissions.kt, called by whoever
+         builds the UI. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <application>
+
+        <!-- The ONE player. Owned here, bound by PlayerController, kept alive
+             by the system for as long as playback runs; that is what makes
+             audio survive the activity leaving the screen. -->
+        <service
+            android:name="com.giathinh.hashplay.PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+
+        <!-- A ready-made player activity for embedders who do not want to
+             build their own screen. Not exported: only the embedding app
+             launches it, by explicit intent. -->
+        <activity
+            android:name="com.giathinh.hashplay.HashPlayerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+    </application>
+</manifest>

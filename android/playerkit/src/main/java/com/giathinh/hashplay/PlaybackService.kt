@@ -62,7 +62,15 @@ class PlaybackService : MediaSessionService() {
     private fun pendingIntentToMainActivity() = android.app.PendingIntent.getActivity(
         this,
         0,
-        Intent(this, MainActivity::class.java).apply {
+        // The kit cannot name the embedding app's activity -- it does not know
+        // it. The launcher intent is the right handle either way: standalone
+        // that is MainActivity, embedded it is whatever the host app fronts.
+        // FLAG_ACTIVITY_SINGLE_TOP is preserved so a tap on the notification
+        // reuses the existing task instead of stacking a copy.
+        (packageManager.getLaunchIntentForPackage(packageName)
+            ?: Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         },
         android.app.PendingIntent.FLAG_IMMUTABLE or

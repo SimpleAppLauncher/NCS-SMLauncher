@@ -235,6 +235,10 @@ androidComponents {
 }
 
 dependencies {
+    // The player engine + sphere + fonts live in :playerkit now. The app
+    // layers flavor-specific behavior (torrenting, screens, flavor routing)
+    // on top of it; another app could layer its own instead.
+    implementation(project(":playerkit"))
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
