@@ -4,6 +4,11 @@ set -e
 cd "$(dirname "$0")"
 
 # 1. build the single-file executable
+# The NCS ball's C core: compile (idempotent, cheap) before bundling. If this
+# fails the app still builds -- the renderer falls back to numpy -- so a
+# failure here must not abort the bundle.
+./scripts/build_native.sh || echo "WARNING: native core not built; the app will use the numpy fallback"
+
 python3 -m PyInstaller HashPlay.spec --noconfirm
 
 # 2. derive the minimum macOS version from the Python we just built against.

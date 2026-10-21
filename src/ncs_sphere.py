@@ -61,6 +61,7 @@ What each earlier attempt got wrong, and the fix:
 import math
 
 import numpy as np
+import ncs_native as _native
 
 import pygame
 
@@ -106,6 +107,24 @@ SPHERE_POINTS_MAX = 240000
 # reads as the same sphere. The brightness compensation further down already
 # handles a sparser cloud -- it divides by the shortfall so fewer, wider-looking
 # points do not come out dim -- so this does not need a colour change.
+
+_native_bufs = {}
+
+
+def _native_buf(rw, rh):
+    """The accumulator for the C fast path: allocated once per internal size
+    and reused every frame. Clearing a reused buffer is far cheaper than
+    allocating a fresh one, and it removes the last per-frame allocation but
+    the uint8 image."""
+    b = _native_bufs.get((rw, rh))
+    if b is None:
+        if len(_native_bufs) > 3:
+            _native_bufs.clear()
+        b = np.zeros((rh, rw, 3), dtype=np.float32)
+        _native_bufs[(rw, rh)] = b
+    return b
+
+
 def _density():
     """(point scale, render scale) for the build this binary was made as."""
     try:
@@ -248,6 +267,13 @@ def _sphere_geometry(w, h):
         p += rng.normal(0, 0.003, p.shape).astype(np.float32)
         p /= np.linalg.norm(p, axis=1, keepdims=True)
         geo = {"base": p,
+               # Contiguous per-axis planes for the C core. pts[:, 0] is a
+               # strided view -- ctypes.data_as on it reads garbage (every
+               # third float), which is how the native path first failed its
+               # equivalence test. Computed once here, reused every frame.
+               "bx": np.ascontiguousarray(p[:, 0]),
+               "by": np.ascontiguousarray(p[:, 1]),
+               "bz": np.ascontiguousarray(p[:, 2]),
                "lat": np.arcsin(np.clip(p[:, 1], -1, 1)),
                "lon": np.arctan2(p[:, 2], p[:, 0])}
         _sphere_cache[key] = geo
@@ -457,6 +483,51 @@ def draw_ncs_sphere(screen, player, w, h, t, lean_value=0.0):
     radius = min(rw, rh) * _R_BASE * (1.0 - _R_SWING + _R_SWING * bass)
 
     bx, by, bz = pts[:, 0], pts[:, 1], pts[:, 2]
+
+    # --- fast path: the same math in C, writing into reused buffers -------
+    # Saves the ~16 MB of numpy temporaries per frame (the RAM spikes) and
+    # most of the frame time. The numpy code below is unchanged and stays the
+    # reference; tests/test_ncs_native.py compares the two so they cannot
+    # drift. Everything from here to the accumulator reuse is native; if the
+    # library is not built, execution falls through to the original path.
+    if _native.available():
+        ang = t * 0.30
+        tilt = 0.10 + 0.06 * math.sin(t * 0.5) + 0.03 * math.sin(t * 1.7)
+        sx, sy, cr, cg, cb, ridge, rim = _native.project(
+            geo["bx"], geo["by"], geo["bz"], la, lo, ang, tilt, t, bass, mid, high,
+            0.040 + 0.130 * bass, float(cx), float(cy), float(radius),
+            _RIDGE_LO, _RIDGE_POW, _CREST, _DARK)
+        # Density normalization (same formula as the numpy path below).
+        ref_ball_px = math.pi * (min(rw, rh) * _R_BASE) ** 2
+        ppp = ref_ball_px / len(pts)
+        shortfall = _REF_PPP / ppp
+        k = shortfall ** _NORM_POW if shortfall > 1.0 else 1.0
+        # Apply the normalization IN PLACE on the scratch planes: the numpy
+        # path multiplies before splatting, and skipping it here rendered the
+        # ball ~3x too dark (found by the equivalence test, which is why the
+        # test exists).
+        cr *= k
+        cg *= k
+        cb *= k
+        # One accumulator, allocated once per size and REUSED: the last
+        # allocation this path does per frame is the uint8 image itself.
+        buf = _native_buf(rw, rh)
+        buf[...] = 0
+        _native.splat(buf, rw, rh, sx, sy, cr, cg, cb, _DOT)
+        solid = (ridge > 0.30) | (rim > 0.15)
+        if solid.any():
+            _native.splat(buf, rw, rh, sx[solid], sy[solid],
+                          cr[solid] * _FILL_W, cg[solid] * _FILL_W,
+                          cb[solid] * _FILL_W, _FILL3)
+        np.clip(buf, 0, 255, out=buf)
+        buf[..., 1] *= 0.90
+        buf[..., 2] *= 0.80
+        img = buf.astype(np.uint8)
+        surf = pygame.surfarray.make_surface(np.transpose(img, (1, 0, 2)))
+        if surf.get_width() != w or surf.get_height() != h:
+            surf = pygame.transform.smoothscale(surf, (w, h))
+        screen.blit(surf, (0, 0))
+        return
 
     # --- rotation: spin about Y, with only a slight tilt about X ---
     # The tilt is deliberately small. A sphere's silhouette is only circular at

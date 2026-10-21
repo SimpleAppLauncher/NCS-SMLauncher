@@ -58,10 +58,17 @@ hidden = (_lt + [
 # never tell it is out of date.
 datas = [('VERSION', '.')]
 
+# The C core for the NCS ball (built by scripts/build_native.sh). Optional at
+# runtime -- a bundle without it falls back to the numpy path -- but the mac
+# build compiles it first so releases ship the fast path.
+import os as _os
+_native_dylib = 'src/native/libncs_core.dylib'
+binaries = [(_native_dylib, '.')] if _os.path.exists(_native_dylib) else []
+
 a = Analysis(
     ['src/ncs_launcher.py'],
     pathex=['src'],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hidden,
     hookspath=[],

@@ -164,3 +164,9 @@ tests/__pycache__/
 *.rej
 .DS_Store
 .screenshots/
+
+# Compiled native core (build with scripts/build_native.sh; the .c source is
+# committed, the library is a local artifact)
+src/native/libncs_core.dylib
+src/native/libncs_core.so
+*.pyd
