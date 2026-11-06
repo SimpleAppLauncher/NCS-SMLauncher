@@ -9,6 +9,7 @@ track index change on its own, with no input at all.
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,16 @@ import time
 import urllib.request
 
 ROOT = "/Users/giathinh/ncs-music-launcher"
-PORT = 8791
+
+
+def _available_port():
+    """Pick a currently unused TCP port so the test cannot hit a live app."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("0.0.0.0", 0))
+        return probe.getsockname()[1]
+
+
+PORT = _available_port()
 
 tmp = tempfile.mkdtemp(prefix="hp-adv-")
 lib = os.path.join(tmp, "lib")
@@ -29,14 +39,17 @@ for name in ("one", "two", "three"):
                     "-ar", "44100", os.path.join(lib, f"{name}.wav")],
                    capture_output=True)
 
-# Only the VIDEO driver is faked. Faking the audio driver means PortAudio
-# never calls _callback, so the playhead never moves, nothing ever ends and
-# there is nothing to observe -- the first version of this test passed a
-# silent app and called it a failure of the feature.
+# SDL's video driver is dummy so no window is opened. The virtual
+# sounddevice fixture advances the player's callback clock in memory and zeros
+# its output buffer before discarding it; the real PortAudio device is never
+# imported or opened. This preserves the timing signal without audible output.
 env = dict(os.environ,
            HASHPLAY_CONFIG_DIR=cfg, HASHPLAY_API_PORT=str(PORT),
-           SDL_VIDEODRIVER="dummy")
-env.pop("SDL_AUDIODRIVER", None)
+           SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy",
+           PYTHONPATH=os.pathsep.join((
+               os.path.join(ROOT, "tests", "fixtures", "silent_clock"),
+               os.environ.get("PYTHONPATH", ""),
+           )))
 proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "src", "ncs_launcher.py"), lib],
                         cwd=ROOT, env=env,
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -65,6 +78,18 @@ try:
         # its own bug.
         return body.get("result", body)
 
+    def play_index(index):
+        payload = json.dumps({"index": index}).encode()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{PORT}/play", data=payload, method="POST")
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read().decode())
+        if response.status != 200 or not result.get("ok"):
+            raise AssertionError(f"could not start silent playback: {result}")
+
+    play_index(0)
     time.sleep(2.0)
     seen = []
     print("   watching a 3-track, 3-second-each library with no input:")

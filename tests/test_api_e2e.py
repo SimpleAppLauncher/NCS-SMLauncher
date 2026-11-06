@@ -1,12 +1,10 @@
-"""End-to-end: the real launcher, running headless, serving the real API.
+"""End-to-end: the real launcher and bridge, with output hard-muted.
 
-This boots `ncs_launcher.py` as an actual subprocess, waits for its control
-API to come up, and then drives playback over HTTP -- the same path an agent
-on this machine would take. It is the only test that proves the three pieces
-(launcher wiring, main-loop pump, control_api) actually meet.
-
-Runs against a throwaway config dir and a temp library, so it never reads or
-writes the real ~/Music or the real settings.json.
+Boots `ncs_launcher.py` as a real headless subprocess, waits for HTTP, and
+exercises launcher wiring, main-loop dispatch, the v2 bridge, and legacy API.
+A `tests/fixtures/no_audio/sounddevice.py` stub replaces PortAudio; the test
+never opens an output device or emits sound. The fixture also uses a throwaway
+config directory and temporary library rather than the real ~/Music/settings.
 """
 import json
 import os
@@ -85,7 +83,10 @@ env["SDL_VIDEODRIVER"] = "dummy"       # the test drives it, not a human
 env["SDL_AUDIODRIVER"] = "dummy"
 env["HASHPLAY_CONFIG_DIR"] = cfgdir
 env["HASHPLAY_API_PORT"] = str(PORT)
-env["PYTHONPATH"] = os.path.join(ROOT, "src")
+env["PYTHONPATH"] = os.pathsep.join((
+    os.path.join(ROOT, "tests", "fixtures", "no_audio"),
+    os.path.join(ROOT, "src"),
+))
 
 proc = subprocess.Popen(
     [sys.executable, os.path.join(ROOT, "src", "ncs_launcher.py"), lib],
@@ -146,8 +147,34 @@ try:
     check("setup_pending is present and false for an explicit folder arg",
           st.get("setup_pending") is False, st.get("setup_pending"))
 
+    print("1a) the EF Launcher snapshot and control route are live")
+    s, snapshot = get("/state", token)
+    check("GET /state returns the launcher snapshot directly",
+          s == 200 and isinstance(snapshot, dict)
+          and "positionMs" in snapshot and "durationMs" in snapshot, snapshot)
+    check("queue contains the scanned temp library",
+          len(snapshot.get("queue", [])) >= 2,
+          len(snapshot.get("queue", [])))
+    check("absolute filesystem paths are not included in queue items",
+          all("path" not in row for row in snapshot.get("queue", [])))
+    s, body = post("/control", {"action": "volume", "value": 0.65}, token)
+    check("POST /control volume reaches the player's volume handler",
+          s == 200 and body.get("ok") is True
+          and (body.get("result") or {}).get("volume") == 0.65, body)
+    volume_seen = None
+    status = {}
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        s, status = get("/status", token)
+        volume_seen = (status.get("result") or {}).get("volume")
+        if s == 200 and volume_seen == 0.65:
+            break
+        time.sleep(0.02)
+    check("next published snapshot reflects volume without starting audio",
+          s == 200 and volume_seen == 0.65, str(volume_seen))
+
     print("1b) the main loop is actually turning over")
-    f1 = (body.get("result") or {}).get("frame")
+    f1 = (status.get("result") or {}).get("frame")
     time.sleep(1.5)
     s, body2 = get("/status", token)
     f2 = (body2.get("result") or {}).get("frame")

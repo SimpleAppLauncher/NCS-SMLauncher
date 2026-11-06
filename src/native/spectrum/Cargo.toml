@@ -1,0 +1,16 @@
+[package]
+name = "ncs-spectrum"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Allocation-stable spectrum analyzer for NCS-SMLauncher"
+
+[lib]
+name = "ncs_spectrum"
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

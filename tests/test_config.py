@@ -23,8 +23,12 @@ def main():
     cfg = config.load_config(path)
     assert cfg == config.default_config(), cfg
     assert cfg["keymap"] == config.DEFAULT_KEYMAP, cfg["keymap"]
+    assert cfg["api_host"] == "0.0.0.0", cfg["api_host"]
+    if not os.environ.get("HASHPLAY_API_PORT"):
+        assert cfg["api_port"] == 8765, cfg["api_port"]
     assert not os.path.exists(path)
     print("   defaults OK ->", sorted(cfg))
+    print("   first-run API defaults to authenticated LAN bind on port 8765")
 
     print("2) save/load round-trips")
     cfg["library_folder"] = "/Users/giathinh/Music/NCS"

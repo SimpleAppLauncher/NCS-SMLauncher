@@ -264,22 +264,25 @@ jobs:
             echo "HASHPLAY_STORE_PASS=$KEY_PASSWORD"
           } >> "$GITHUB_ENV"
 
-      - name: Build both APKs
-        run: ./scripts/build_android_apks.sh both
+      - name: Build all three signed APKs
+        run: ./scripts/build_android_apks.sh all
 
-      - name: Prove the lite APK really is lighter
+      - name: Prove the APK flavor contents
         # R8 does most of the work here, and a mis-scoped packaging rule can
-        # silently strip the torrent engine from the FULL build instead -- which
-        # still produces a passing build. Assert the shape, do not trust it.
+        # silently strip the torrent engine from the full/NCS builds instead --
+        # which still produces passing APKs. Assert every flavor's shape.
         run: |
           set -euo pipefail
           FULL=$(find android/app/build/outputs/apk/full/release -name '*.apk' | head -1)
           LITE=$(find android/app/build/outputs/apk/lite/release -name '*.apk' | head -1)
-          test -n "$FULL" && test -n "$LITE" || {
-            echo "::error::an APK is missing"; exit 1; }
+          NCS=$(find android/app/build/outputs/apk/ncs/release -name '*.apk' | head -1)
+          test -n "$FULL" && test -n "$LITE" && test -n "$NCS" || {
+            echo "::error::one or more flavor APKs are missing"; exit 1; }
 
           unzip -l "$FULL" | grep -q libtorrent4j.so || {
             echo "::error::full APK has no torrent engine -- the exclude leaked"; exit 1; }
+          unzip -l "$NCS" | grep -q libtorrent4j.so || {
+            echo "::error::NCS APK has no torrent engine -- the exclude leaked"; exit 1; }
           if unzip -l "$LITE" | grep -q libtorrent4j.so; then
             echo "::error::lite APK still ships the 12 MB torrent engine"; exit 1;
           fi
@@ -296,6 +299,7 @@ jobs:
           path: |
             android/app/build/outputs/apk/full/release/*.apk
             android/app/build/outputs/apk/lite/release/*.apk
+            android/app/build/outputs/apk/ncs/release/*.apk
           if-no-files-found: error
 
   release:
@@ -319,8 +323,8 @@ jobs:
           # "HashPlay-linux-x86_64-<version>.tar.gz"), and an earlier version
           # of this step enumerated them -- and missed HashPlay.app.zip
           # entirely, which would have silently dropped the main macOS
-          # download. The APKs are renamed explicitly below, since Gradle's
-          # names really are ambiguous.
+          # download. The three Android APKs are renamed explicitly below,
+          # since Gradle's names really are ambiguous.
           find dist -type f \( \
             -name 'HashPlay-macos-arm64' -o \
             -name 'HashPlay-linux-x86_64' -o \
@@ -332,6 +336,9 @@ jobs:
           done
           for f in $(find dist -name 'app-lite-release.apk'); do
             cp "$f" "payload/HashPlay-lite-android-arm64.apk"
+          done
+          for f in $(find dist -name 'app-ncs-release.apk'); do
+            cp "$f" "payload/HashPlay-ncs-android-arm64.apk"
           done
           ls -la payload/
       - name: Checksums

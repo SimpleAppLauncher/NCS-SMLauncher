@@ -21,6 +21,10 @@ fi
 
 echo "Building HashPlay ${VERSION} (${BUILD}) for Windows x64"
 
+# The optional Rust FFT is compiled for the current platform and bundled by
+# HashPlay.spec. If Rust is unavailable, NumPy remains the functional fallback.
+./scripts/build_spectrum.sh || echo "warning: Rust spectrum unavailable; NumPy fallback stays active" >&2
+
 # No --windowed here: PyInstaller refuses makespec options ("option(s) not
 # allowed ... makespec options not valid when a .spec file is given"), and
 # HashPlay.spec already sets console=True. That is deliberate on our side --

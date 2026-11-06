@@ -133,6 +133,14 @@ print("MODES", ",".join(modes))
 _loaded = sorted(m for m in ("libtorrent", "ncs_video", "ncs_sphere",
                              "control_api") if m in sys.modules)
 print("LOADED", ",".join(_loaded) if _loaded else "none")
+_sphere = sys.modules.get("ncs_sphere")
+if _sphere is not None:
+    print("DENSITY", *_sphere._density())
+    print("SPHERE_BUF_BYTES",
+          sum(int(buf.nbytes) for buf in _sphere._native_bufs.values()))
+else:
+    print("DENSITY none")
+    print("SPHERE_BUF_BYTES 0")
 """
     # rss() helper
     script = script.replace("import os, sys, gc",
@@ -142,7 +150,9 @@ print("LOADED", ",".join(_loaded) if _loaded else "none")
                             "    return resource.getrusage("
                             "resource.RUSAGE_SELF).ru_maxrss")
     samples = []
-    modes = loaded = None
+    modes = loaded = ""
+    density = None
+    buffer_bytes = 0
     for _ in range(runs):
         out = subprocess.run([sys.executable, "-c", script], env=env,
                              capture_output=True, text=True, timeout=600)
@@ -156,23 +166,30 @@ print("LOADED", ",".join(_loaded) if _loaded else "none")
                 rest = line.split(None, 1)
                 val = rest[1].strip() if len(rest) > 1 else ""
                 loaded = "" if val == "none" else val
+            elif line.startswith("DENSITY"):
+                fields = line.split()[1:]
+                density = None if fields == ["none"] else tuple(map(float, fields))
+            elif line.startswith("SPHERE_BUF_BYTES"):
+                buffer_bytes = int(line.split()[1])
         if peak is None:
             raise SystemExit(f"no measurement for {lite}\n"
                              f"STDOUT:{out.stdout[-800:]}\n"
                              f"STDERR:{out.stderr[-1500:]}")
         samples.append(peak)
-    return min(samples), modes, loaded
+    return min(samples), modes, loaded, density, buffer_bytes
 
 
 print("MEMORY BY TIER -- 1280x748, 90 frames, silent (no audio device)\n")
 
-full_peak, full_modes, full_mods = measure("full")
+full_peak, full_modes, full_mods, full_density, full_buf_bytes = measure("full")
 print(f"  full : {full_peak / MB:7.1f} MB   modes: {full_modes}")
 print(f"          loaded: {full_mods or '(none of the four)'}")
-lite_peak, lite_modes, lite_mods = measure("lite")
+print(f"          sphere density {full_density}; buffers {full_buf_bytes / MB:.2f} MB")
+lite_peak, lite_modes, lite_mods, lite_density, lite_buf_bytes = measure("lite")
 print(f"  lite : {lite_peak / MB:7.1f} MB   modes: {lite_modes}")
 print(f"          loaded: {lite_mods or '(none of the four)'}")
-micro_peak, micro_modes, micro_mods = measure("micro")
+print(f"          sphere density {lite_density}; buffers {lite_buf_bytes / MB:.2f} MB")
+micro_peak, micro_modes, micro_mods, micro_density, micro_buf_bytes = measure("micro")
 print(f"  micro: {micro_peak / MB:7.1f} MB   modes: {micro_modes}")
 print(f"          loaded: {micro_mods or '(none of the four)'}")
 
@@ -186,22 +203,23 @@ check("radial" in full_modes, "full build drew the NCS ball")
 check("radial" in lite_modes,
       "lite DREW the ball -- it is the same feature at lower density")
 check("radial" not in micro_modes, "micro never drew the ball")
-# The sphere's own allocation measured 24.8 MB; video (ffmpeg) 25.5 MB.
-check(lite_mb < full_mb - 8,
-      f"lite is meaningfully lighter ({full_mb - lite_mb:.1f} MB > 8 MB)")
-# Thresholds are set from measured runs, not from what sounds reasonable.
-# Micro removes libtorrent (6.2 MB) and the ffmpeg video pipeline; the first
-# version of this asserted 8 MB and 80 MB and failed on correct code, which is
-# how a test teaches you to ignore it. The floors now sit below the real
-# figures with room for machine-to-machine variation, and the ORDERING
-# assertion below is the one that actually matters: a tier that removes a
-# feature must not weigh more than the tier that keeps it.
-# NOT asserted here: that micro uses less RSS than lite.
-#
-# Measured from source the gap is only a few MB, and run-to-run RSS noise on a
-# loaded machine is larger than that -- it came out at -0.1 MB, i.e. backwards,
-# with both builds provably correct. A threshold inside the noise band is a
-# coin flip, and a test that is a coin flip is worse than no test.
+# Process RSS is still printed above, but it is no longer the gate: the
+# compiled C renderer reuses its buffers and removed the old NumPy transient
+# allocations that made an 8 MB RSS delta meaningful. Check the actual reusable
+# sphere buffers and their build-time density instead.
+check(full_density == (1.0, 0.5),
+      "full renderer keeps reference point/render density", str(full_density))
+check(lite_density == (0.34, 0.34),
+      "lite renderer uses its reduced point/render density", str(lite_density))
+check(full_buf_bytes > 0 and lite_buf_bytes < full_buf_bytes * 0.5,
+      "lite reusable sphere buffers are less than half the full buffers",
+      f"full {full_buf_bytes} bytes, lite {lite_buf_bytes} bytes")
+check(micro_density is None and micro_buf_bytes == 0,
+      "micro has no sphere buffer", f"density {micro_density}, bytes {micro_buf_bytes}")
+# RSS is an informative measurement, not a cross-tier assertion: on a loaded
+# machine run-to-run noise can exceed the few MB difference. Micro's removable
+# modules are checked deterministically below, and its reduced sphere buffers
+# are zero because it has no radial mode.
 #
 # What micro actually saves is not loading libtorrent and not bundling ffmpeg,
 # and the first half of that IS checkable here, deterministically: see the

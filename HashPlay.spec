@@ -62,8 +62,25 @@ datas = [('VERSION', '.')]
 # runtime -- a bundle without it falls back to the numpy path -- but the mac
 # build compiles it first so releases ship the fast path.
 import os as _os
-_native_dylib = 'src/native/libncs_core.dylib'
-binaries = [(_native_dylib, '.')] if _os.path.exists(_native_dylib) else []
+import sys as _sys
+
+if _sys.platform == 'darwin':
+    _core_lib = 'src/native/libncs_core.dylib'
+    _spectrum_lib = 'src/native/libncs_spectrum.dylib'
+elif _sys.platform.startswith('linux'):
+    _core_lib = 'src/native/libncs_core.so'
+    _spectrum_lib = 'src/native/libncs_spectrum.so'
+elif _sys.platform == 'win32':
+    _core_lib = ''  # C renderer has the NumPy fallback on Windows for now.
+    _spectrum_lib = 'src/native/ncs_spectrum.dll'
+else:
+    _core_lib = ''
+    _spectrum_lib = ''
+
+binaries = []
+for _native_lib in (_core_lib, _spectrum_lib):
+    if _native_lib and _os.path.exists(_native_lib):
+        binaries.append((_native_lib, '.'))
 
 a = Analysis(
     ['src/ncs_launcher.py'],

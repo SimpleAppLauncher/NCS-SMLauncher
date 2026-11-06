@@ -169,4 +169,8 @@ tests/__pycache__/
 # committed, the library is a local artifact)
 src/native/libncs_core.dylib
 src/native/libncs_core.so
+src/native/libncs_spectrum.dylib
+src/native/libncs_spectrum.so
+src/native/ncs_spectrum.dll
+src/native/spectrum/target/
 *.pyd

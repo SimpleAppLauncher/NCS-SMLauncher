@@ -49,6 +49,11 @@ import hashlib
 
 import numpy as np
 
+try:
+    import ncs_spectrum_native as _rust_spectrum
+except ImportError:
+    _rust_spectrum = None
+
 from media_keys import MediaKeyTap, open_accessibility_settings
 import config as appconfig
 import actions as appactions
@@ -335,6 +340,12 @@ class Player(threading.Thread):
 
     def spectrum(self):
         window = self.ring.copy()
+        if _rust_spectrum is not None:
+            result = _rust_spectrum.spectrum(
+                window, SAMPLE_RATE, 50.0, 16000.0, NUM_BARS, 8.0,
+                math.log(1 + 40))
+            if result is not None:
+                return result
         spec = np.abs(np.fft.rfft(window * np.hanning(len(window))))
         freqs = np.fft.rfftfreq(len(window), 1.0 / SAMPLE_RATE)
         edges = np.geomspace(50, 16000, NUM_BARS + 1)
@@ -1058,9 +1069,9 @@ def pick_folder_dialog(current):
 # --------------------------------------------------------------------------
 # 1.0.x embedded a chat panel that shelled out to the `hermes` CLI. That made
 # a music player depend on one specific agent install and forced the user to
-# type into the app's own text box. control_api.py replaces it with a
-# loopback HTTP API, so Claude Code, OpenCode, curl, or anything else on this
-# machine can drive playback. The panel below just shows the URL and token.
+# type into the app's own text box. control_api.py replaces it with an
+# authenticated LAN HTTP API, so the EF Launcher tablet and local clients can
+# drive playback. The panel below shows the base URL and token.
 
 
 def wrap_text(font, text, max_w):
@@ -1097,9 +1108,9 @@ def wrap_text(font, text, max_w):
 class ApiPanel:
     """Read-only panel showing how to drive the app from an agent.
 
-    Deliberately not a chat box. The app has no opinion about which agent you
-    use; it just exposes a loopback API, and this panel tells you the URL,
-    the token, and one example so you can copy something that works.
+    Deliberately not a chat box. The app has no opinion about which client you
+    use; it exposes an authenticated LAN API, and this panel tells you the
+    reachable base URL, the token, and example requests.
     """
 
     def __init__(self, font, rect, describe):
@@ -1120,7 +1131,7 @@ class ApiPanel:
         pygame.draw.rect(panel, (0, 230, 190, 150), panel.get_rect(), 2)
         screen.blit(panel, r.topleft)
 
-        head = self.font.render("CONTROL API  ·  any agent on this machine",
+        head = self.font.render("CONTROL API  ·  authenticated LAN bridge",
                                 True, (0, 230, 190))
         screen.blit(head, (r.x + pad, r.y + 12))
         pygame.draw.line(screen, (255, 255, 255, 30),
@@ -1131,21 +1142,19 @@ class ApiPanel:
         rows = [
             ("endpoint", self.describe()),
             ("", ""),
-            ("example", "curl -H 'Authorization: Bearer <token>' \\"),
-            ("", "     http://127.0.0.1:8777/status"),
-            ("", "curl -X POST -H 'Authorization: Bearer <token>' \\"),
-            ("", "     -d '{\"query\": \"ncs\"}' http://127.0.0.1:8777/play"),
+            ("example", "curl -H 'Authorization: Bearer ***' \\"),
+            ("", "  http://<desktop-LAN-IP>:8765/state"),
+            ("", "curl -N -H 'Authorization: Bearer ***' \\"),
+            ("", "  http://<desktop-LAN-IP>:8765/events"),
             ("", ""),
-            ("webhook", "for bots that cannot send a header:"),
-            ("", "  curl -X POST -d 'track=daft punk' \\"),
-            ("", "  'http://127.0.0.1:8777/webhook?token=<token>'"),
-            ("", "  plain-text reply; also takes action=, next=, volume=, seek="),
+            ("endpoints", "GET  /state  /events  /art/{id}.jpg"),
+            ("", "POST /control: play, pause, next, prev"),
+            ("", "       seek (positionMs/deltaMs), volume (value)"),
             ("", ""),
-            ("endpoints", "GET  /status  /tracks  /tracks/search?q="),
-            ("", "POST /play /pause /resume /next /prev /seek"),
-            ("", "     /volume /muted /visualizer /video /webhook"),
+            ("legacy", "GET /status /tracks; POST /play /pause /next /prev"),
+            ("", "       /seek /volume /muted /visualizer /webhook"),
             ("", ""),
-            ("note", "loopback only; nothing off this machine can reach it."),
+            ("note", "trusted LAN only; bearer token required on every route."),
             ("", "Esc closes."),
         ]
         colour_muted = (140, 145, 160)
@@ -1499,8 +1508,8 @@ def main():
         api_token = capi_mod.load_or_make_token(
             os.path.join(appconfig.CONFIG_DIR, "api_token"))
         api = capi_mod.ControlAPI(
-            host=cfg.get("api_host") or "127.0.0.1",
-            port=int(cfg.get("api_port") or 8777),
+            host=cfg.get("api_host") or "0.0.0.0",
+            port=int(cfg.get("api_port") or 8765),
             token=api_token,
             enabled=bool(cfg.get("api_enabled", True)),
         )
@@ -1516,6 +1525,40 @@ def main():
         push_notice(("error", f"{why} -- remote control is off"), 10.0)
     api_open = False
     api_panel = None               # built lazily, needs the font
+
+    # Snapshot queue metadata once per library change, not once per frame. The
+    # HTTP/SSE path can hand out the same immutable tuple without re-allocating
+    # hundreds of dictionaries at 60 Hz.
+    api_queue = ()
+    api_art_ids = {}
+
+    def _refresh_api_catalog():
+        nonlocal api_queue, api_art_ids
+        if api is None:
+            return
+        queue_rows = []
+        art_ids = {}
+        art_paths = {}
+        for i, track in enumerate(tracks):
+            art_path = track.get("art_path")
+            art_id = None
+            if art_path and os.path.isfile(art_path):
+                art_key = os.path.realpath(art_path)
+                art_id = hashlib.sha256(art_key.encode("utf-8")).hexdigest()[:24]
+                art_ids[art_path] = art_id
+                art_paths[art_id] = art_path
+            queue_rows.append({
+                "id": i,
+                "title": track.get("title"),
+                "artist": track.get("artist"),
+                "album": track.get("album"),
+                "artwork": f"/art/{art_id}.jpg" if art_id else None,
+            })
+        api_queue = tuple(queue_rows)
+        api_art_ids = art_ids
+        api.set_artwork_paths(art_paths)
+
+    _refresh_api_catalog()
 
     # ---- first-run setup ------------------------------------------------
     # A first launch with no library folder has nothing to show and no obvious
@@ -1564,6 +1607,12 @@ def main():
         """
         try:
             return round(float(p.position()), 2)
+        except Exception:
+            return 0.0
+
+    def _safe_duration(p):
+        try:
+            return round(float(p.duration()), 2)
         except Exception:
             return 0.0
 
@@ -1742,10 +1791,10 @@ def main():
         """Report whether a newer release exists. Changes nothing.
 
         This is deliberately check-only. src/updater.py can download, verify
-        and stage an update, and apply it on the next launch, but wiring that
-        to a remote-callable command would let anything that can reach the
-        loopback API replace the binary. Reporting is safe; installing is a
-        decision for a person at the keyboard.
+        and stage an update, and apply it on the next launch, but exposing the
+        installer as a remote command would let any authenticated LAN client
+        replace the binary. Reporting is safe; installing is a decision for a
+        person at the keyboard.
         """
         include_pre = bool(a.get("prerelease"))
         try:
@@ -1812,6 +1861,7 @@ def main():
         cfg["library_folder"] = folder
         tracks.clear()
         scan_library(folders, tracks)
+        _refresh_api_catalog()
         selected = 0
         # Keep the media-key box in step. It is read at the top of the
         # loop as the authoritative selection, so a rescan that reset only
@@ -1840,6 +1890,7 @@ def main():
         folders[0] = folder
         tracks.clear()
         scan_library(folders, tracks)
+        _refresh_api_catalog()
         selected = 0
         nonlocal_selected[0] = 0
         if tracks:
@@ -2376,32 +2427,37 @@ def main():
         # same frame. Both must be here, not in the HTTP thread, because SDL
         # is not thread-safe.
         if api is not None:
+            current_track = _cur()
+            art_path = current_track.get("art_path")
+            art_id = api_art_ids.get(art_path)
             api.publish({
                 "playing": bool(player.track_path) and not player.paused,
-            "paused": bool(player.paused),
-            "track": _cur().get("title"),
-            "artist": _cur().get("artist"),
-            "index": selected,
-            "position": _safe_position(player),
-            "volume": _safe_volume(player),
-            "muted": muted,
-            "visualizer": modes[vis_mode_idx],
-            "visualizers": modes,
-            "video": (video_slot.message or ("playing" if video_slot.is_active()
-                                             else "off")),
-            "track_count": len(tracks),
-            "library_folder": folder,
-            # An agent polling /status can tell it needs to wait for the user
-            # rather than assuming the player is broken.
-            "setup_pending": bool(setup_active),
-            "api": {"host": api.host, "port": api.port, "version": 1},
-            # A monotonically rising frame number. An agent polling /status
-            # can tell a busy app from a wedged one: if this stops moving, the
-            # main loop is not turning over and no command will ever be
-            # serviced. Cheaper and more honest than inferring it from a
-            # stalled playhead.
-            "frame": frame_no,
-        })
+                "paused": bool(player.paused),
+                "track": current_track.get("title"),
+                "title": current_track.get("title"),
+                "artist": current_track.get("artist"),
+                "album": current_track.get("album"),
+                "index": selected,
+                "position": _safe_position(player),
+                "duration": _safe_duration(player),
+                "volume": _safe_volume(player),
+                "muted": muted,
+                "visualizer": modes[vis_mode_idx],
+                "visualizers": modes,
+                "video": (video_slot.message or ("playing" if video_slot.is_active()
+                                                 else "off")),
+                "track_count": len(tracks),
+                "queue": api_queue,
+                "artwork": f"/art/{art_id}.jpg" if art_id else None,
+                "_artwork_id": art_id,
+                "_artwork_path": art_path,
+                "library_folder": folder,
+                "setup_pending": bool(setup_active),
+                "api": {"host": api.host, "port": api.port, "version": 2},
+                # A monotonically rising frame number lets local clients tell
+                # a busy app from a wedged main loop.
+                "frame": frame_no,
+            })
         if api is not None:
             api.drain(API_HANDLERS)
 

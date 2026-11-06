@@ -77,6 +77,7 @@ print("\n  both flavors exist")
 check("productFlavors" in gradle, "product flavors are declared")
 check(re.search(r'create\("full"\)', gradle) is not None, "a full flavor")
 check(re.search(r'create\("lite"\)', gradle) is not None, "a lite flavor")
+check(re.search(r'create\("ncs"\)', gradle) is not None, "an NCS flavor")
 
 print("\n  they can be installed side by side")
 check('applicationIdSuffix = ".lite"' in gradle,
@@ -166,7 +167,9 @@ check("${FLAVOR^}" not in _code and "${FLAVOR^^}" not in _code,
       "shell, and ${VAR^} is not POSIX -- under sh it is 'bad substitution'")
 for flavor, task in (("full", "assembleFullRelease"),
                      ("lite", "assembleLiteRelease"),
-                     ("both", "assembleFullRelease assembleLiteRelease")):
+                     ("ncs", "assembleNcsRelease"),
+                     ("both", "assembleFullRelease assembleLiteRelease"),
+                     ("all", "assembleFullRelease assembleLiteRelease assembleNcsRelease")):
     check(task in script,
           f"building {flavor!r} names {task!r} explicitly",
           "each flavor must map to its own Gradle task, or one branch goes untested")
@@ -470,9 +473,10 @@ print("\n  an unsigned release APK is refused, not shipped")
 check("HASHPLAY_HAVE_SIGNING" in gradle, "signing is conditional on real key material")
 check("isMinifyEnabled = true" in gradle, "R8 is on for release")
 
-print("\n  CI builds and ships both")
+print("\n  CI builds and ships full, lite and NCS")
 check("name: Android (APK)" in workflow, "there is an android CI job")
-check("build_android_apks.sh both" in workflow, "CI builds both flavors")
+check("build_android_apks.sh all" in workflow,
+      "CI builds all three APK flavors")
 # android-actions/setup-android@v3 is deliberately NOT used: on the current
 # runner image it runs `sdkmanager tools`, which no longer exists, and fails
 # before any of this repo's steps. Two rc.5 runs died there identically.
@@ -491,6 +495,12 @@ check("HashPlay-lite-android-arm64.apk" in workflow,
       "the lite APK is renamed to match the desktop naming before upload")
 check("HashPlay-full-android-arm64.apk" in workflow,
       "the full APK is renamed too")
+check("HashPlay-ncs-android-arm64.apk" in workflow,
+      "the NCS APK is renamed too")
+check("app-ncs-release.apk" in workflow,
+      "the NCS release artifact is collected")
+check("apk/ncs/release" in workflow,
+      "the NCS APK is uploaded from CI")
 # The publish step must not narrow its globs. It did once and dropped
 # HashPlay.app.zip, the main macOS download, with no error anywhere.
 publish = workflow[workflow.find("name: Assemble the payload"):

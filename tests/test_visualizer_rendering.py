@@ -8,6 +8,7 @@ the same picture as decoding the art fresh every frame.
 """
 import os
 import sys
+import tempfile
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -19,7 +20,7 @@ import ncs_launcher as L                              # noqa: E402
 
 W, H = 1280, 748
 MODES = ["radial", "disc", "album", "bars", "mirror", "video"]
-OUT = "/tmp/hp_vis_out"
+OUT = tempfile.mkdtemp(prefix="ncs-vis-render-")
 
 fails = []
 
@@ -34,7 +35,7 @@ def check(label, cond, detail=""):
 
 def make_art():
     """A real PNG, so the album-art cache path is genuinely exercised."""
-    path = "/tmp/hp_profile_art.png"
+    path = os.path.join(OUT, "hp_profile_art.png")
     if not os.path.exists(path):
         from PIL import Image
         Image.new("RGBA", (256, 256), (90, 40, 160, 255)).save(path)
@@ -82,7 +83,7 @@ for m in MODES:
     lit = int((arr.sum(axis=2) > 24).sum())
     frac = lit / (W * H)
     shots[m] = arr
-    pygame.image.save(surf, f"{OUT}/{m}.png")
+    pygame.image.save(surf, os.path.join(OUT, f"{m}.png"))
     # The bar modes draw a strip at the bottom; the ball modes fill the
     # middle. Anything under a thousand lit pixels is an empty window.
     check(f"{m:8} lights up the screen ({frac*100:5.1f}%)", lit > 1000, lit)

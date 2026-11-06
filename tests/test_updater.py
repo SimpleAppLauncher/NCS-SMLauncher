@@ -60,7 +60,7 @@ def ok(msg):
 
 
 # -- 1. constants ----------------------------------------------------------
-assert updater.REPO == "Giathinh1234/NCS-SMLauncher", updater.REPO
+assert updater.REPO == "SimpleAppLauncher/NCS-SMLauncher", updater.REPO
 assert updater.API == "https://api.github.com/repos/{repo}/releases", updater.API
 assert updater.TIMEOUT == 30, updater.TIMEOUT
 assert updater.UPDATES_DIR.endswith(os.path.join(".ncs-smlauncher", "updates")), updater.UPDATES_DIR

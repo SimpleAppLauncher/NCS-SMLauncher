@@ -18,6 +18,7 @@ else
 fi
 
 echo "Building HashPlay ${VERSION} (${BUILD})"
+./scripts/build_native.sh || echo "warning: native cores unavailable; NumPy fallback stays active" >&2
 "${PYI[@]}" HashPlay.spec --noconfirm
 
 tar -czf "dist/HashPlay-linux-x86_64-${VERSION}.tar.gz" dist/HashPlay

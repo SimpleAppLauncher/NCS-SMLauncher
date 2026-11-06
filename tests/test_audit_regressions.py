@@ -83,8 +83,8 @@ check("do_pick_folder takes 0 required and at most 1 positional arg",
 
 # ------------------------------------------------------ 4. config import crash
 print("4) HASHPLAY_API_PORT=not-a-port killed the app at import")
-for raw, want in (("not-a-port", 8777), ("99999", 8777), ("-5", 8777),
-                  ("", 8777), ("8899", 8899), ("  8899  ", 8899)):
+for raw, want in (("not-a-port", 8765), ("99999", 8765), ("-5", 8765),
+                  ("", 8765), ("8899", 8899), ("  8899  ", 8899)):
     env = dict(os.environ, HASHPLAY_API_PORT=raw, PYTHONPATH=os.path.join(ROOT, "src"))
     p = subprocess.run(
         [sys.executable, "-c",

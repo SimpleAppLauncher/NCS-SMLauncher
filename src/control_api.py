@@ -1,10 +1,14 @@
-"""A local HTTP control API, so any AI agent can drive the music.
+"""The desktop app's HTTP API serves two compatible surfaces: the existing
+loopback agent controls and the authenticated LAN bridge for the EF Launcher.
+The bridge binds on 0.0.0.0:8765 by default so the wall-mounted tablet can
+connect; every route requires the 192-bit bearer token stored with mode 0600.
 
-The 1.0.x app embedded a chat panel that shelled out to the `hermes` CLI.
-That coupled a music player to one specific agent install, and the user had to
-be in the app's own text box to use it. This replaces it with a plain
-loopback HTTP API: anything that can make a request -- Claude Code, OpenCode,
-a script, curl, another program on this machine -- can control playback.
+    GET  /state            launcher snapshot (title, position, queue, art URL)
+    GET  /events            SSE state updates, about once per second
+    POST /control           {"action":"play|pause|next|prev|seek|volume", ...}
+    GET  /art/{id}.jpg      current track's cached album cover
+
+Legacy local controls remain available:
 
     GET  /                  service info + every endpoint (discoverable)
     GET  /status            current player state
@@ -14,46 +18,64 @@ a script, curl, another program on this machine -- can control playback.
     POST /pause  /resume  /next  /prev
     POST /seek              {"seconds": 30} | {"delta": -5}
     POST /volume            {"value": 0.5} | {"delta": -0.1}
-    POST /muted             {"value": true}
-    POST /visualizer        {"mode": "bars"} | {"next": true}
-    POST /video             {"source": "/path/clip.mp4"} | {"off": true}
+    POST /muted              {"value": true}
+    POST /visualizer         {"mode": "bars"} | {"next": true}
+    POST /video              {"source": "/path/clip.mp4"} | {"off": true}
 
 TWO DESIGN RULES WORTH KNOWING:
 
-1. **Loopback only, and token-authenticated.** The server binds 127.0.0.1, so
-   nothing off this machine can reach it, but any local process could. Every
-   request needs `Authorization: Bearer <token>`; the token is generated once
-   and stored with the rest of the settings. Without it, a random web page
-   could have driven the player's audio. Constant-time comparison, because a
-   token check that leaks its own length is not a token check.
+1. **LAN bind + bearer token.** The bridge is reachable on the local network
+   for the tablet client, but it is not unauthenticated: every route checks a
+   constant-time bearer-token comparison. The token is generated once and
+   stored with the rest of the settings at mode 0600. Keep the tablet and host
+   on a trusted LAN; use `api_host=127.0.0.1` to disable LAN reachability.
 
 2. **The HTTP thread never touches pygame.** Calling set_mode or blitting
    from another thread is undefined behaviour in SDL, and a crash there would
    look like a random freeze. Instead the server enqueues a command and waits
    on an Event; the main loop drains the queue at the top of each frame and
    publishes the result. State the other way (main -> HTTP) is a plain dict
-   the main loop replaces wholesale each frame, which is atomic in CPython
-   and needs no lock.
+   the main loop replaces wholesale each frame, which is atomic in CPython and
+   needs no lock. SSE serializes at 1 Hz and has a bounded client count.
 """
 import json
 import hmac
+import math
 import os
 import queue
 import secrets
 import shutil
+import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # Bumped when the response shape changes, so an agent can tell.
-API_VERSION = 1
+API_VERSION = 2
 
-DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8777
+DEFAULT_HOST = "0.0.0.0"  # LAN bridge; every route requires the 0600 bearer token
+DEFAULT_PORT = 8765
+MAX_SSE_CLIENTS = 8
+MAX_ART_BYTES = 12 * 1024 * 1024
 
 # Bounded so one bad agent cannot grow the process without limit. A queue that
 # only ever grows is a slow memory leak with extra steps.
 MAX_PENDING = 64
 MAX_BODY = 64 * 1024        # a control command is never this big
+
+
+class _NoReverseDNSHTTPServer(ThreadingHTTPServer):
+    """Bind without the stdlib HTTPServer's synchronous reverse-DNS lookup.
+
+    ``HTTPServer.server_bind`` calls ``socket.getfqdn(host)`` before returning.
+    On hosts with slow/unavailable mDNS or reverse DNS this can block the
+    launcher's main thread before its first frame. The API only needs the
+    literal bind address, not a canonical hostname.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = str(self.server_address[0])
+        self.server_port = self.server_address[1]
 
 
 def probe_dependencies():
@@ -121,13 +143,74 @@ class ControlAPI:
         # Replaced wholesale by the main loop each frame. A single attribute
         # rebind is atomic, so the HTTP thread always sees a whole snapshot.
         self.snapshot = {}
+        self._artwork_paths = {}
         self._server = None
         self._thread = None
+        self._events_slots = threading.BoundedSemaphore(MAX_SSE_CLIENTS)
+        self._stopped = threading.Event()
 
     # ---- main-loop side ------------------------------------------------
     def publish(self, state):
         """Hand the HTTP thread a fresh state snapshot. Called every frame."""
         self.snapshot = state
+
+    def _launcher_state(self):
+        """Stable snapshot shape for the EF Launcher client."""
+        snap = self.snapshot or {}
+        def _milliseconds(ms_key, seconds_key):
+            value = snap.get(ms_key)
+            if value is None:
+                try:
+                    value = float(snap.get(seconds_key, 0.0)) * 1000.0
+                except (TypeError, ValueError, OverflowError):
+                    value = 0.0
+            try:
+                return int(max(0, round(float(value))))
+            except (TypeError, ValueError, OverflowError):
+                return 0
+
+        position_ms = _milliseconds("positionMs", "position")
+        duration_ms = _milliseconds("durationMs", "duration")
+        try:
+            volume = float(snap.get("volume", 1.0))
+            if not math.isfinite(volume):
+                volume = 1.0
+        except (TypeError, ValueError, OverflowError):
+            volume = 1.0
+        return {
+            "title": snap.get("title", snap.get("track")),
+            "artist": snap.get("artist"),
+            "album": snap.get("album"),
+            "positionMs": position_ms,
+            "durationMs": duration_ms,
+            "volume": volume,
+            "playing": bool(snap.get("playing", False)),
+            "artwork": snap.get("artwork"),
+            "queue": snap.get("queue", []),
+        }
+
+    def set_artwork_paths(self, paths):
+        """Atomically replace the trusted ID -> cached JPEG map after a rescan."""
+        self._artwork_paths = dict(paths or {})
+
+    def _read_artwork(self, art_id):
+        """Serve only art from the current scanned library and below the size cap."""
+        snap = self.snapshot or {}
+        path = self._artwork_paths.get(art_id)
+        if path is None and art_id == str(snap.get("_artwork_id") or ""):
+            path = snap.get("_artwork_path")
+        if not isinstance(path, str) or not path.lower().endswith((".jpg", ".jpeg")):
+            return None
+        try:
+            if os.path.getsize(path) > MAX_ART_BYTES:
+                return None
+            with open(path, "rb") as handle:
+                data = handle.read(MAX_ART_BYTES + 1)
+            if len(data) > MAX_ART_BYTES:
+                return None
+            return data
+        except OSError:
+            return None
 
     def drain(self, handler_map, limit=16):
         """Run queued commands on the main thread.
@@ -174,14 +257,12 @@ class ControlAPI:
             def _authed(self, allow_query_token=False):
                 """Check the bearer token.
 
-                `allow_query_token` exists only for /webhook, because most
-                webhook senders (Discord, Slack test boxes, IFTTT, a curl on
-                a phone) can add a URL but cannot add an Authorization header.
-                It is a real trade-off: a token in a URL is far more likely to
-                end up in a proxy log, a shell history, or a screenshot than a
-                header is. Since this binds loopback-only and the token lives
-                in a 0600 file, that risk is bounded -- but the header form is
-                still the better one, and is what the other routes require.
+                `allow_query_token` exists only for /webhook, because some
+                webhook senders can configure a URL but cannot add a header.
+                Tokens in URLs leak through histories and screenshots, so this
+                compatibility path is restricted to loopback callers. Every
+                LAN client must use Authorization: Bearer. The token is stored
+                at mode 0600; all comparisons are constant-time.
                 """
                 got = self.headers.get("Authorization", "")
                 if not got:
@@ -189,12 +270,19 @@ class ControlAPI:
                     if got:
                         got = f"Bearer {got}"
                 if not got and allow_query_token:
-                    from urllib.parse import parse_qs, urlparse
-                    q = (parse_qs(urlparse(self.path).query,
-                                  keep_blank_values=True)
-                         .get("token", [""])[0])
-                    if q:
-                        got = f"Bearer {q}"
+                    import ipaddress
+                    remote = self.client_address[0]
+                    try:
+                        local_only = ipaddress.ip_address(remote).is_loopback
+                    except ValueError:
+                        local_only = False
+                    if local_only:
+                        from urllib.parse import parse_qs, urlparse
+                        q = (parse_qs(urlparse(self.path).query,
+                                      keep_blank_values=True)
+                             .get("token", [""])[0])
+                        if q:
+                            got = f"Bearer {q}"
                 want = f"Bearer {api.token}"
                 # compare_digest, not ==: a plain comparison leaks the token
                 # length through timing.
@@ -311,6 +399,52 @@ class ControlAPI:
                 status, payload = self._call(name, args)
                 self._send(status, payload)
 
+            def _events(self):
+                if not api._events_slots.acquire(blocking=False):
+                    return self._deny(503, "too many event clients")
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache, no-transform")
+                    self.send_header("Connection", "keep-alive")
+                    self.send_header("X-Accel-Buffering", "no")
+                    self.end_headers()
+                    previous = None
+                    while not api._stopped.is_set():
+                        payload = json.dumps(api._launcher_state(),
+                                             separators=(",", ":"), default=str)
+                        if payload == previous:
+                            frame = ": keepalive\n\n"
+                        else:
+                            frame = f"event: state\ndata: {payload}\n\n"
+                            previous = payload
+                        self.wfile.write(frame.encode("utf-8"))
+                        self.wfile.flush()
+                        if api._stopped.wait(1.0):
+                            break
+                except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+                    pass  # client closed or the app is shutting down
+                finally:
+                    api._events_slots.release()
+
+            def _art(self, path):
+                name = path.rsplit("/", 1)[-1]
+                if not name.endswith(".jpg"):
+                    return self._deny(404, "artwork not found")
+                art_id = name[:-4]
+                data = api._read_artwork(art_id)
+                if data is None:
+                    return self._deny(404, "artwork not found")
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "private, max-age=3600")
+                self.end_headers()
+                try:
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
             # ---- routes ----
             def do_GET(self):
                 if not self._authed():
@@ -318,6 +452,12 @@ class ControlAPI:
                 path = self.path.split("?", 1)[0].rstrip("/") or "/"
                 if path == "/":
                     return self._send(200, api._index())
+                if path == "/state":
+                    return self._send(200, api._launcher_state())
+                if path == "/events":
+                    return self._events()
+                if path.startswith("/art/"):
+                    return self._art(path)
                 if path == "/status":
                     return self._send(200, {"ok": True, "result": api.snapshot})
                 if path == "/tracks":
@@ -365,6 +505,29 @@ class ControlAPI:
                     return self._deny(400, "body must be a JSON object")
                 if path == "/webhook":
                     return self._do_webhook(args)
+                if path == "/control":
+                    action = args.pop("action", None)
+                    if not isinstance(action, str):
+                        return self._deny(400, "control needs a string 'action'")
+                    action = action.strip().lower()
+                    if action == "previous":
+                        action = "prev"
+                    if action not in ("play", "pause", "next", "prev", "seek", "volume"):
+                        return self._deny(400, f"unknown control action: {action}")
+                    if action == "seek":
+                        if "positionMs" in args:
+                            try:
+                                args["seconds"] = float(args.pop("positionMs")) / 1000.0
+                            except (TypeError, ValueError, OverflowError):
+                                return self._deny(400, "positionMs must be a number")
+                        elif "deltaMs" in args:
+                            try:
+                                args["delta"] = float(args.pop("deltaMs")) / 1000.0
+                            except (TypeError, ValueError, OverflowError):
+                                return self._deny(400, "deltaMs must be a number")
+                    if action == "volume" and "value" not in args and "volume" in args:
+                        args["value"] = args.pop("volume")
+                    return self._reply(action, args)
                 if path in ("/play", "/pause", "/resume", "/next", "/prev",
                             "/seek", "/volume", "/muted", "/visualizer",
                             "/video", "/update_check"):
@@ -509,8 +672,9 @@ class ControlAPI:
                     return self._text(200, f"{action}: {len(result)} item(s)")
                 return self._text(200, f"{action}: ok")
 
+        self._stopped.clear()
         try:
-            self._server = ThreadingHTTPServer((self.host, self.port), Handler)
+            self._server = _NoReverseDNSHTTPServer((self.host, self.port), Handler)
         except OSError as exc:
             self._server = None
             self.last_error = f"could not bind {self.host}:{self.port} ({exc})"
@@ -533,9 +697,13 @@ class ControlAPI:
                 "auth": "send 'Authorization: Bearer <token>' on every request",
                 "endpoints": {
                     "GET /": "this list",
+                    "GET /state": "EF Launcher snapshot",
+                    "GET /events": "authenticated SSE state stream (~1 Hz)",
+                    "GET /art/{id}.jpg": "current track's cached cover",
                     "GET /status": "current player state",
                     "GET /tracks": "the library",
                     "GET /tracks/search?q=": "search title/artist",
+                    "POST /control": '{"action":"play|pause|next|prev|seek|volume", ...}',
                     "POST /webhook": 'one-shot form or JSON: '
                                      '{"action":"play","query":"daft punk"} '
                                      "— also accepts ?token= for senders "
@@ -556,6 +724,7 @@ class ControlAPI:
         }
 
     def stop(self):
+        self._stopped.set()
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
@@ -568,7 +737,10 @@ class ControlAPI:
             return "control API disabled (api_enabled = false)"
         if self._server is None:
             return self.last_error or "API not running"
-        return f"http://{self.host}:{self.port}  (token: {self.token})"
+        host = self.host
+        if host in ("0.0.0.0", "::"):
+            host = "<desktop-LAN-IP>"
+        return f"http://{host}:{self.port}  (token: {self.token})"
 
 
 def load_or_make_token(path):

@@ -26,10 +26,12 @@ case "$(uname -s)" in
         # this library uses only libm.
         $CC $CFLAGS -shared -o "$OUT_MAC" "$SRC"
         echo "built $OUT_MAC"
+        ./scripts/build_spectrum.sh || echo "WARNING: Rust spectrum not built; NumPy fallback stays active" >&2
         ;;
     Linux)
         $CC $CFLAGS -shared -o "$OUT_LINUX" "$SRC" -lm
         echo "built $OUT_LINUX"
+        ./scripts/build_spectrum.sh || echo "WARNING: Rust spectrum not built; NumPy fallback stays active" >&2
         ;;
     *)
         echo "no native build rule for $(uname -s); the numpy fallback stays active" >&2

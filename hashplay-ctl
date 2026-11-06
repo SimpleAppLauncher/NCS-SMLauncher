@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """hashplay-ctl -- drive HashPlay from the command line, or from any agent.
 
-This is the whole point of the control API: the app exposes a loopback HTTP
-endpoint so anything on this machine can control playback. This script is one
-such client, and doubles as a worked example of the four calls that matter.
+This is one client of the authenticated HTTP API. New installs expose the
+bridge on the trusted LAN (with a bearer token); this script defaults to the
+same machine and reads that token from the app-managed file. Set HASHPLAY_API
+to a tablet/desktop URL when remote access is intended.
 
     hashplay-ctl status
     hashplay-ctl list
@@ -26,7 +27,7 @@ import sys
 import urllib.error
 import urllib.request
 
-BASE = os.environ.get("HASHPLAY_API", "http://127.0.0.1:8777")
+BASE = os.environ.get("HASHPLAY_API", "http://127.0.0.1:8765")
 TOKEN_PATH = os.environ.get(
     "HASHPLAY_TOKEN",
     os.path.join(os.path.expanduser("~"), ".ncs-smlauncher", "api_token"))

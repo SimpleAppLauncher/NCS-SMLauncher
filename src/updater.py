@@ -38,7 +38,7 @@ except Exception:  # pragma: no cover - only when running outside the bundle
     version = None
 
 
-REPO = "Giathinh1234/NCS-SMLauncher"
+REPO = "SimpleAppLauncher/NCS-SMLauncher"
 API = "https://api.github.com/repos/{repo}/releases"
 UPDATES_DIR = os.path.join(os.path.expanduser("~"), ".ncs-smlauncher", "updates")
 TIMEOUT = 30

@@ -47,7 +47,7 @@ DEFAULT_KEYMAP = {
     "quit": "Q",
 }
 
-def _env_port(name="HASHPLAY_API_PORT", fallback=8777):
+def _env_port(name="HASHPLAY_API_PORT", fallback=8765):
     """Read a port from the environment, ignoring anything unusable.
 
     This used to be a bare int() inside the dict literal below, evaluated at
@@ -79,12 +79,11 @@ DEFAULT_CONFIG = {
     "easter_eggs": True,
     "schema_version": 0,
     "keymap": {},
-    # Control API (src/control_api.py). The host is deliberately not
-    # configurable to anything but loopback: this endpoint can change what the
-    # speakers do, so exposing it on a LAN interface would hand volume control
-    # to anyone on the network. The port is free to move if 8777 is taken.
+    # Control API (src/control_api.py). LAN bind for the authenticated EF
+    # Launcher bridge; every route requires a mode-0600 bearer token. Users
+    # who want machine-only access can set api_host to 127.0.0.1.
     "api_enabled": True,
-    "api_host": "127.0.0.1",
+    "api_host": "0.0.0.0",
     "api_port": _env_port(),
     "setup_complete": False,
     # "lite" strips the two things that cost the most and matter least to

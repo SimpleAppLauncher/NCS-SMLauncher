@@ -52,7 +52,10 @@ def run_case(name, settings, folder_maker, env_extra=None, read_only=False):
         "SDL_AUDIODRIVER": "dummy",
         "HASHPLAY_CONFIG_DIR": cfg,
         "HASHPLAY_API_PORT": str(PORT),
-        "PYTHONPATH": os.path.join(ROOT, "src"),
+        "PYTHONPATH": os.pathsep.join((
+            os.path.join(ROOT, "tests", "fixtures", "no_audio"),
+            os.path.join(ROOT, "src"),
+        )),
     })
     if env_extra:
         env.update(env_extra)
@@ -161,7 +164,7 @@ print("5) the API port is already taken")
 import socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind(("127.0.0.1", PORT))
+sock.bind(("0.0.0.0", PORT))
 sock.listen(1)
 try:
     alive, served, log = run_case("port taken", None, with_audio)

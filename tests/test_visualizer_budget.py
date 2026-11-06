@@ -13,6 +13,7 @@ quietly, and nothing else in the suite would notice.
 import gc
 import os
 import sys
+import tempfile
 import time
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -23,8 +24,10 @@ import numpy as np                                    # noqa: E402
 import pygame                                         # noqa: E402
 import ncs_launcher as L                              # noqa: E402
 
+OUT = tempfile.mkdtemp(prefix="ncs-vis-budget-")
 W, H = 1280, 748
 FRAME_BUDGET_MS = 16.7
+
 
 # Per-mode ceilings. Measured after the fix: bars 1.9, mirror 1.5, disc 2.3,
 # album 3.1, radial 12.3. Before it: bars 13.9, mirror 21.2, disc 17.4,
@@ -47,7 +50,7 @@ def check(label, cond, detail=""):
 
 
 def make_art():
-    path = "/tmp/hp_perf_art.png"
+    path = os.path.join(OUT, "hp_perf_art.png")
     if not os.path.exists(path):
         from PIL import Image
         Image.new("RGBA", (256, 256), (90, 40, 160, 255)).save(path)

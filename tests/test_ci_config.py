@@ -154,6 +154,22 @@ _lp = art_linux[0]["with"]["path"]
 assert "upload" in _lp, art_linux[0]["with"]
 ok("artifacts upload as HashPlay-macos-arm64 and HashPlay-linux-x86_64 with the right paths")
 
+# Release all three Android product flavors, not only full/lite: NCS is a
+# separately installable tablet/player flavor and should travel in the same
+# prerelease as the desktop builds.
+_android = jobs.get("android") or {}
+_android_steps = _android.get("steps") or []
+assert any("build_android_apks.sh all" in (s.get("run") or "")
+           for s in _android_steps), "CI does not build the NCS Android flavor"
+_android_uploads = [s for s in _android_steps
+                    if s.get("uses", "").startswith("actions/upload-artifact")]
+assert _android_uploads and "apk/ncs/release" in _android_uploads[0]["with"]["path"], (
+    "Android NCS APK is not uploaded from CI")
+_rel_script = "\\n".join(s.get("run", "") for s in jobs["release"]["steps"])
+assert "app-ncs-release.apk" in _rel_script and "HashPlay-ncs-android-arm64.apk" in _rel_script, (
+    "release assembler does not include the NCS APK")
+ok("Android CI builds, uploads and publishes full/lite/NCS release APKs")
+
 
 # -- 3. dependencies.yml: parses, weekly, issues:write --------------------
 deps_text = read(DEPS_YML)

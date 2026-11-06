@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 
 PROFILE="${1:-lite}"
 APP="dist/HashPlay-$PROFILE.app"
-PORT="${HASHPLAY_API_PORT:-8777}"
+PORT="${HASHPLAY_API_PORT:-8765}"
 PROBE="$(mktemp -d /tmp/hp_lite_bin.XXXXXX)"
 fails=0
 

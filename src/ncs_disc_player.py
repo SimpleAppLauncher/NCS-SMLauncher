@@ -40,6 +40,11 @@ try:
 except ImportError:
     sys.exit("Missing dependency 'numpy'. Run: pip install numpy")
 
+try:
+    import ncs_spectrum_native as _rust_spectrum
+except ImportError:
+    _rust_spectrum = None
+
 
 # ============================================================================
 # CONFIGURATION
@@ -193,6 +198,12 @@ class Player(threading.Thread):
     def spectrum(self):
         """Get frequency spectrum for visualization."""
         window = self.ring.copy()
+        if _rust_spectrum is not None:
+            result = _rust_spectrum.spectrum(
+                window, SAMPLE_RATE, 50.0, 2000.0, NUM_BARS, 3.0,
+                math.log(1 + 10))
+            if result is not None:
+                return result
         spec = np.abs(np.fft.rfft(window * np.hanning(len(window))))
         freqs = np.fft.rfftfreq(len(window), 1.0 / SAMPLE_RATE)
         # Focus on lower frequencies for disc effect
