@@ -33,7 +33,14 @@ def check(label, cond, detail=""):
         fails.append(label)
 
 
-def run_case(name, settings, folder_maker, env_extra=None, read_only=False):
+def _free_port():
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def run_case(name, settings, folder_maker, env_extra=None, read_only=False, fixed_port=None):
     """Launch the app in a hostile environment; return (log, alive)."""
     tmp = tempfile.mkdtemp(prefix="hashplay-rob-")
     cfg = os.path.join(tmp, "cfg")
@@ -45,13 +52,14 @@ def run_case(name, settings, folder_maker, env_extra=None, read_only=False):
     lib = folder_maker(tmp)
     if read_only:
         os.chmod(cfg, 0o500)          # readable, not writable
+    port = int(fixed_port or _free_port())
 
     env = dict(os.environ)
     env.update({
         "SDL_VIDEODRIVER": "dummy",
         "SDL_AUDIODRIVER": "dummy",
         "HASHPLAY_CONFIG_DIR": cfg,
-        "HASHPLAY_API_PORT": str(PORT),
+        "HASHPLAY_API_PORT": str(port),
         "PYTHONPATH": os.pathsep.join((
             os.path.join(ROOT, "tests", "fixtures", "no_audio"),
             os.path.join(ROOT, "src"),
@@ -65,21 +73,26 @@ def run_case(name, settings, folder_maker, env_extra=None, read_only=False):
          *([lib] if lib else [])],
         cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True)
-    time.sleep(7)
-
-    alive = proc.poll() is None
     served = False
     token = os.path.join(cfg, "api_token")
-    if alive and os.path.exists(token):
-        tok = open(token, encoding="utf-8").read().strip()
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{PORT}/status")
-        req.add_header("Authorization", f"Bearer {tok}")
-        try:
-            with urllib.request.urlopen(req, timeout=5) as r:
-                served = r.status == 200
-        except Exception:
-            served = False
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            break
+        if os.path.exists(token):
+            tok = open(token, encoding="utf-8").read().strip()
+            if tok:
+                req = urllib.request.Request(f"http://127.0.0.1:{port}/status")
+                req.add_header("Authorization", f"Bearer {tok}")
+                try:
+                    with urllib.request.urlopen(req, timeout=2) as r:
+                        served = r.status == 200
+                except Exception:
+                    served = False
+                if served:
+                    break
+        time.sleep(0.5)
+    alive = proc.poll() is None
 
     # Read the log unconditionally. It used to be captured only when the app
     # had already exited, which meant a running-but-degraded app -- exactly
@@ -167,7 +180,7 @@ sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind(("0.0.0.0", PORT))
 sock.listen(1)
 try:
-    alive, served, log = run_case("port taken", None, with_audio)
+    alive, served, log = run_case("port taken", None, with_audio, fixed_port=PORT)
     # served will be False (that port is the *other* socket, not our app).
     # What matters is that the app is alive and told the user why.
     check("survives a port collision", alive, log[-400:])

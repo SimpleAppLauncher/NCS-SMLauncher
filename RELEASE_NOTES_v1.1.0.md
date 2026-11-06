@@ -15,9 +15,11 @@ Stable release for the desktop app and Android flavors.
 - Every Python file is compiled individually before release.
 - Desktop tests run headlessly without opening an audio device or playing sound.
 - CI builds all desktop platforms and all Android flavors.
-- Release assets include SHA256 checksums generated beside the assets.
+- Release assets include SHA256 checksums generated beside the assets. Verify after download with `shasum -a 256 -c SHA256SUMS.txt`.
+- Repository: https://github.com/SimpleAppLauncher/NCS-SMLauncher
+- Nokia T20 visual QA verified on Android 13: HashPlay NCS opened to the track list and mirror visualizer without playback.
+- Updater verified from 1.0.1: stable v1.1.0 is offered by default; the running v1.1.0 build does not offer itself.
 
 ## Known limits
 
-- Nokia tablet visual QA must be listed as pending unless the device was unlocked and the UI was actually inspected.
 - The in-app updater only offers stable releases by default.

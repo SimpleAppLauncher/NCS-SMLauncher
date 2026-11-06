@@ -76,33 +76,29 @@ try:
     check("and reports no update by default",
           result.get("update") is None, result.get("update"))
 
-    print("2) the running build is the rc, so the rc is not an update for it")
-    # This app IS v1.1.0-rc.1, and the newest published release is
-    # v1.1.0-rc.1. "Newer than what is running" must be false, or an rc
-    # would offer itself to the people running it. Asserting the opposite
-    # here would have been a test that only passes if releases are broken.
+    print("2) the running build is stable, so stable is not an update for it")
+    # This app IS v1.1.0 stable, and the newest published stable release is
+    # v1.1.0. "Newer than what is running" must be false, or a stable build
+    # would offer itself to the people running it.
     res = call("update_check", {"prerelease": True}, token=token)
     result = res.get("result", res)
     check("opting in still reports no update for itself",
           result.get("update") is None, result.get("update"))
 
-    print("2b) but a 1.0.1 user WOULD be offered it -- verified directly,")
-    print("    since this process is already running the rc")
+    print("2b) but a 1.0.1 user WOULD be offered stable v1.1.0 -- verified directly,")
+    print("    since this process is already running v1.1.0")
     sys.path.insert(0, os.path.join(ROOT, "src"))
     import updater
 
-    # Ask the live API what the newest prerelease actually is, rather than
-    # hardcoding a version. Hardcoding meant this test broke every time a new
-    # candidate was cut, which trains people to ignore it.
-    # A sentinel OLDER than anything published, so "newest" really is newest.
-    # (Using a high version here returns None for the opposite reason: nothing
-    # is newer than it, which is the same None that means "no prerelease".)
-    probe = updater.fetch_latest(current="0.0.1", include_prerelease=True)
-    newest_pre = None if probe is None else probe.version
-    check("the published prerelease can be discovered",
-          newest_pre is not None, newest_pre)
+    # Ask the live API for the newest stable release rather than hardcoding a
+    # version. Hardcoding meant this test broke every time a new candidate was
+    # cut, which trains people to ignore it.
+    stable = updater.fetch_latest(current="1.0.1", include_prerelease=False)
+    stable_version = None if stable is None else stable.version
+    check("the published stable release can be discovered",
+          stable_version == BUILT_VERSION, stable_version or "")
 
-    for flags, want in ((False, None), (True, newest_pre)):
+    for flags, want in ((False, stable_version), (True, stable_version)):
         info = updater.fetch_latest(current="1.0.1",
                                     include_prerelease=flags)
         got = None if info is None else info.version

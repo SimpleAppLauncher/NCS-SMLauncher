@@ -11,8 +11,8 @@ import sys
 import zipfile
 import zlib
 
-REPO = "Giathinh1234/NCS-SMLauncher"
-TAG = "v1.1.0-rc.4"
+REPO = "SimpleAppLauncher/NCS-SMLauncher"
+TAG = "v1.1.0"
 ASSET = "HashPlay-lite-macos-arm64.app.zip"
 MACOS = "https://github.com/%s/releases/download/%s/%s" % (REPO, TAG, ASSET)
 
